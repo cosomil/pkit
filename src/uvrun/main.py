@@ -67,7 +67,7 @@ def _run_script(project_dir: Path) -> int:
 _QUIT = object()  # 「終了」選択用センチネル
 
 
-def _select_from_history() -> Path | None:
+def _select_from_history(first_try: bool) -> Path | None:
     """questionary で履歴からプロジェクトを選択。キャンセル時は None。"""
     history = load_valid_history(_pick_script)
     if not history:
@@ -83,7 +83,9 @@ def _select_from_history() -> Path | None:
     choices.append(questionary.Choice(title="[終了]", value=_QUIT))
 
     result = questionary.select(
-        "次に実行するプロジェクトを選択してください:",
+        "実行するプロジェクトを選択してください:"
+        if first_try
+        else "次に実行するプロジェクトを選択してください:",
         choices=choices,
     ).ask()
 
@@ -102,7 +104,7 @@ def main():
                 "ヒント: プロジェクトフォルダーをショートカットにドラッグ＆ドロップしてください。"
             )
             sys.exit(2)
-        project_dir = _select_from_history()
+        project_dir = _select_from_history(first_try=True)
         if project_dir is None:
             sys.exit(0)
     else:
@@ -134,7 +136,7 @@ def main():
 
         try_record_history(project_dir, _pick_script)
 
-        project_dir = _select_from_history()
+        project_dir = _select_from_history(first_try=False)
 
     sys.exit(0)
 
