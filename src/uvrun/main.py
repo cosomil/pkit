@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from uvrun.history import try_record_history
+
 
 def _pick_script(project_dir: Path) -> Path:
     """
@@ -84,6 +86,7 @@ def main():
         str(script_rel),
     ]
     completed = subprocess.run(cmd, cwd=str(project_dir))
+    try_record_history(project_dir, _pick_script)
     sys.exit(completed.returncode)
 
 
