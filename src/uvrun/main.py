@@ -65,13 +65,37 @@ def _run_script(project_dir: Path) -> int:
 
 
 _QUIT = object()  # 「終了」選択用センチネル
+_ENTER_PATH = object()  # 「パスを入力」選択用センチネル
+
+
+def _strip_surrounding_quotes(s: str) -> str:
+    """先頭・末尾のシングルクォートまたはダブルクォートを取り除く。"""
+    s = s.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
+def _validate_project_path(raw: str) -> bool | str:
+    """questionary のバリデーター。有効なプロジェクトディレクトリなら True を返す。"""
+    text = _strip_surrounding_quotes(raw)
+    if not text:
+        return "パスを入力してください。"
+    p = Path(text).expanduser()
+    if not p.exists():
+        return f"存在しないパスです: {p}"
+    if not p.is_dir():
+        return f"ディレクトリではありません: {p}"
+    try:
+        _pick_script(p.resolve())
+    except FileNotFoundError as e:
+        return str(e)
+    return True
 
 
 def _select_from_history(first_try: bool) -> Path | None:
     """questionary で履歴からプロジェクトを選択。キャンセル時は None。"""
     history = load_valid_history(_pick_script)
-    if not history:
-        return None
 
     choices = [
         questionary.Choice(
@@ -80,6 +104,9 @@ def _select_from_history(first_try: bool) -> Path | None:
         )
         for h in history
     ]
+    choices.append(
+        questionary.Choice(title="[プロジェクトの場所を入力]", value=_ENTER_PATH)
+    )
     choices.append(questionary.Choice(title="[終了]", value=_QUIT))
 
     result = questionary.select(
@@ -91,19 +118,23 @@ def _select_from_history(first_try: bool) -> Path | None:
 
     if result is _QUIT or result is None:
         return None
+
+    if result is _ENTER_PATH:
+        raw = questionary.path(
+            "プロジェクトフォルダーのパスを入力するかドラッグ＆ドロップしてください:",
+            only_directories=True,
+            validate=_validate_project_path,
+        ).ask()
+        if raw is None:
+            return None
+        return Path(_strip_surrounding_quotes(raw)).expanduser().resolve()
+
     return result
 
 
 def main():
     if len(sys.argv) < 2:
         # 引数なし → 履歴から選択
-        history = load_valid_history(_pick_script)
-        if not history:
-            print("使い方: uvrun <project_dir>")
-            print(
-                "ヒント: プロジェクトフォルダーをショートカットにドラッグ＆ドロップしてください。"
-            )
-            sys.exit(2)
         project_dir = _select_from_history(first_try=True)
         if project_dir is None:
             sys.exit(0)
