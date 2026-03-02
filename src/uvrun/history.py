@@ -50,6 +50,12 @@ def _is_valid_entry(entry: dict, pick_script: Callable[[Path], Path]) -> bool:
     return True
 
 
+def load_valid_history(pick_script: Callable[[Path], Path]) -> list[dict]:
+    """バリデーション済みの履歴エントリを返す。"""
+    history = _read_history()
+    return [h for h in history if _is_valid_entry(h, pick_script)]
+
+
 def try_record_history(project_dir: Path, pick_script: Callable[[Path], Path]) -> None:
     """
     以下を両方満たす場合のみ履歴に追記・更新する:

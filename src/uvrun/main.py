@@ -3,7 +3,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from uvrun.history import try_record_history
+import questionary
+
+from uvrun.history import load_valid_history, try_record_history
 
 
 def _pick_script(project_dir: Path) -> Path:
@@ -53,20 +55,63 @@ def _ensure_dir(arg: str) -> Path:
     return project_dir.resolve()
 
 
+def _run_script(project_dir: Path) -> int:
+    """スクリプトを実行し終了コードを返す。"""
+    script_path = _pick_script(project_dir)
+    script_rel = script_path.relative_to(project_dir)
+    cmd = ["uv", "run", str(script_rel)]
+    completed = subprocess.run(cmd, cwd=str(project_dir))
+    return completed.returncode
+
+
+_QUIT = object()  # 「終了」選択用センチネル
+
+
+def _select_from_history() -> Path | None:
+    """questionary で履歴からプロジェクトを選択。キャンセル時は None。"""
+    history = load_valid_history(_pick_script)
+    if not history:
+        return None
+
+    choices = [
+        questionary.Choice(
+            title=f"{h['name']}  ({h['directory']})",
+            value=Path(h["directory"]),
+        )
+        for h in history
+    ]
+    choices.append(questionary.Choice(title="[終了]", value=_QUIT))
+
+    result = questionary.select(
+        "次に実行するプロジェクトを選択してください:",
+        choices=choices,
+    ).ask()
+
+    if result is _QUIT or result is None:
+        return None
+    return result
+
+
 def main():
     if len(sys.argv) < 2:
-        print("使い方: uvproj-run <project_dir>")
-        print(
-            "ヒント: プロジェクトフォルダーをショートカットにドラッグ＆ドロップしてください。"
-        )
-        sys.exit(2)
-
-    try:
-        project_dir = _ensure_dir(sys.argv[1])
-        script_path = _pick_script(project_dir)
-    except Exception as e:
-        print(f"[起動失敗] {e}")
-        sys.exit(1)
+        # 引数なし → 履歴から選択
+        history = load_valid_history(_pick_script)
+        if not history:
+            print("使い方: uvrun <project_dir>")
+            print(
+                "ヒント: プロジェクトフォルダーをショートカットにドラッグ＆ドロップしてください。"
+            )
+            sys.exit(2)
+        project_dir = _select_from_history()
+        if project_dir is None:
+            sys.exit(0)
+    else:
+        try:
+            project_dir = _ensure_dir(sys.argv[1])
+            _pick_script(project_dir)  # 事前バリデーション
+        except Exception as e:
+            print(f"[起動失敗] {e}")
+            sys.exit(1)
 
     # uv が見つからない場合は分かりやすく
     if shutil.which("uv") is None:
@@ -75,19 +120,23 @@ def main():
         )
         sys.exit(127)
 
-    # uv run は project コンテキストと cwd がズレると混乱しやすいので、
-    # uv 側にも --directory を渡しつつ、subprocess 側の cwd も project_dir に寄せます。
-    # また、uv run の引数衝突を避けるため `--` を挟みます。 (uv run の一般的なパターン)
-    script_rel = script_path.relative_to(project_dir)
+    while project_dir is not None:
+        try:
+            returncode = _run_script(project_dir)
+        except Exception as e:
+            print(f"[起動失敗] {e}")
+            returncode = 1
 
-    cmd = [
-        "uv",
-        "run",
-        str(script_rel),
-    ]
-    completed = subprocess.run(cmd, cwd=str(project_dir))
-    try_record_history(project_dir, _pick_script)
-    sys.exit(completed.returncode)
+        if returncode == 0:
+            print("\n[成功] スクリプトが正常に終了しました。")
+        else:
+            print(f"\n[失敗] スクリプトが終了コード {returncode} で終了しました。")
+
+        try_record_history(project_dir, _pick_script)
+
+        project_dir = _select_from_history()
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":
