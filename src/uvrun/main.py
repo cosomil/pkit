@@ -63,13 +63,14 @@ def _run_script(project_dir: Path) -> int:
     script_rel = script_path.relative_to(project_dir)
     cmd = ["uv", "run", str(script_rel)]
 
-    popen_kwargs = {"cwd": str(project_dir)}
-    if sys.platform == "win32":
-        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore
-    else:
-        popen_kwargs["start_new_session"] = True  # type: ignore
+    process = (
+        subprocess.Popen(
+            cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, cwd=str(project_dir)
+        )
+        if sys.platform == "win32"
+        else subprocess.Popen(cmd, start_new_session=True, cwd=str(project_dir))
+    )
 
-    process = subprocess.Popen(cmd, **popen_kwargs)  # type: ignore
     try:
         return process.wait()
     except KeyboardInterrupt:
