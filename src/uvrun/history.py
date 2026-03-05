@@ -39,13 +39,13 @@ def _is_valid_entry(entry: dict, pick_script: Callable[[Path], Path]) -> bool:
     if not directory:
         return False
     project_dir = Path(directory)
-    if not project_dir.is_dir():
-        return False
-    if not (project_dir / "pyproject.toml").is_file():
-        return False
     try:
+        if not project_dir.is_dir():
+            return False
+        if not (project_dir / "pyproject.toml").is_file():
+            return False
         pick_script(project_dir)
-    except FileNotFoundError:
+    except Exception:
         return False
     return True
 
