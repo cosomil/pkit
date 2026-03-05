@@ -1,6 +1,8 @@
 import shutil
 import subprocess
 import sys
+import os
+import signal
 from pathlib import Path
 
 import questionary
@@ -55,13 +57,87 @@ def _ensure_dir(arg: str) -> Path:
     return project_dir.resolve()
 
 
-def _run_script(project_dir: Path) -> int:
+_INTERRUPTED_EXIT_CODE = -1
+
+
+def _terminate_process(process: subprocess.Popen, interrupt_timeout: float) -> None:
+    """Ctrl+C 時に子プロセスを段階的に停止する。"""
+    if sys.platform == "win32":
+        try:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        except Exception:
+            try:
+                process.terminate()
+            except Exception:
+                return
+    else:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGINT)
+        except Exception:
+            try:
+                process.terminate()
+            except Exception:
+                return
+
+    try:
+        process.wait(timeout=interrupt_timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        if sys.platform == "win32":
+            process.terminate()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except Exception:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        try:
+            if sys.platform == "win32":
+                process.kill()
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired as e:
+            raise TimeoutError(
+                f"プロセス終了要求後も停止しませんでした。pid={process.pid}, timeout={interrupt_timeout}"
+            ) from e
+
+
+def _run_script(project_dir: Path, interrupt_timeout: float) -> int:
     """スクリプトを実行し終了コードを返す。"""
     script_path = _pick_script(project_dir)
     script_rel = script_path.relative_to(project_dir)
     cmd = ["uv", "run", str(script_rel)]
-    completed = subprocess.run(cmd, cwd=str(project_dir))
-    return completed.returncode
+
+    process = (
+        subprocess.Popen(
+            cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, cwd=str(project_dir)
+        )
+        if sys.platform == "win32"
+        else subprocess.Popen(cmd, start_new_session=True, cwd=str(project_dir))
+    )
+
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        # 子プロセス(S)の実行中断を優先し、uvrun 本体は終了させない
+        _terminate_process(process, interrupt_timeout)
+        return _INTERRUPTED_EXIT_CODE
 
 
 _QUIT = object()  # 「終了」選択用センチネル
@@ -155,15 +231,22 @@ def main():
 
     while project_dir is not None:
         try:
-            returncode = _run_script(project_dir)
+            returncode = _run_script(project_dir, interrupt_timeout=5.0)
+        except TimeoutError:
+            print("[中断] スクリプトの中断がタイムアウトしました。")
+            returncode = 1
         except Exception as e:
             print(f"[起動失敗] {e}")
             returncode = 1
 
         if returncode == 0:
             print("\n[成功] スクリプトが正常に終了しました。")
+        elif returncode == _INTERRUPTED_EXIT_CODE:
+            print("\n[中断] スクリプトを中断しました。")
         else:
             print(f"\n[失敗] スクリプトが終了コード {returncode} で終了しました。")
+
+        print()
 
         try_record_history(project_dir, _pick_script)
 
