@@ -17,44 +17,44 @@ def _pick_script(project_dir: Path) -> Path:
       2) project_dir/main.py
       3) (project root直下に .py が1つだけある場合) それ
     """
-    p1 = project_dir / "__main__.py"
-    if p1.is_file():
-        return p1
+    try:
+        p1 = project_dir / "__main__.py"
+        if p1.is_file():
+            return p1
 
-    p2 = project_dir / "main.py"
-    if p2.is_file():
-        return p2
+        p2 = project_dir / "main.py"
+        if p2.is_file():
+            return p2
 
-    py_files = sorted(
-        [p for p in project_dir.glob("*.py") if p.is_file()],
-        key=lambda p: p.name.lower(),
-    )
-    if len(py_files) == 1:
-        return py_files[0]
+        py_files = sorted(
+            [p for p in project_dir.glob("*.py") if p.is_file()],
+            key=lambda p: p.name.lower(),
+        )
+        if len(py_files) == 1:
+            return py_files[0]
 
-    names = ", ".join(p.name for p in py_files) if py_files else "(none)"
-    raise FileNotFoundError(
-        "実行対象のスクリプトを特定できません。\n"
-        "優先順位: __main__.py -> main.py -> (root直下に .py が1つだけならそれ)\n"
-        f"root直下の .py: {names}"
-    )
+    except Exception:
+        raise FileNotFoundError(
+            "実行可能なスクリプトが見つかりません。このディレクトリにはアクセスできない可能性があります。"
+        )
+    raise FileNotFoundError("実行可能なスクリプトが見つかりません。")
 
 
 def _ensure_dir(arg: str) -> Path:
     project_dir = Path(arg).expanduser()
 
-    # ショートカットの %1 が置換されずに渡ってきた等の事故を分かりやすくする
-    if arg.strip() in {"%1", "%~1"}:
-        raise ValueError(
-            "プロジェクトフォルダーが渡っていません。フォルダーをショートカットにドラッグ＆ドロップしてください。"
-        )
+    try:
+        exists = project_dir.exists()
+        is_dir = project_dir.is_dir()
+        resolved = project_dir.resolve()
+    except Exception:
+        raise RuntimeError(f"指定パスにアクセスできません: {project_dir}")
 
-    if not project_dir.exists():
+    if not exists:
         raise FileNotFoundError(f"指定パスが存在しません: {project_dir}")
-    if not project_dir.is_dir():
+    if not is_dir:
         raise NotADirectoryError(f"フォルダーではありません: {project_dir}")
-
-    return project_dir.resolve()
+    return resolved
 
 
 _INTERRUPTED_EXIT_CODE = -1
@@ -158,12 +158,16 @@ def _validate_project_path(raw: str) -> bool | str:
     if not text:
         return "パスを入力してください。"
     p = Path(text).expanduser()
-    if not p.exists():
-        return f"存在しないパスです: {p}"
-    if not p.is_dir():
-        return f"ディレクトリではありません: {p}"
     try:
-        _pick_script(p.resolve())
+        if not p.exists():
+            return f"存在しないパスです: {p}"
+        if not p.is_dir():
+            return f"ディレクトリではありません: {p}"
+        resolved = p.resolve()
+    except Exception:
+        return f"指定パスにアクセスできません: {p}"
+    try:
+        _pick_script(resolved)
     except FileNotFoundError as e:
         return str(e)
     return True
