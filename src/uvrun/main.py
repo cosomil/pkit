@@ -1,6 +1,8 @@
 import shutil
 import subprocess
 import sys
+import os
+import signal
 from pathlib import Path
 
 import questionary
@@ -60,8 +62,30 @@ def _run_script(project_dir: Path) -> int:
     script_path = _pick_script(project_dir)
     script_rel = script_path.relative_to(project_dir)
     cmd = ["uv", "run", str(script_rel)]
-    completed = subprocess.run(cmd, cwd=str(project_dir))
-    return completed.returncode
+
+    popen_kwargs = {"cwd": str(project_dir)}
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore
+    else:
+        popen_kwargs["start_new_session"] = True  # type: ignore
+
+    process = subprocess.Popen(cmd, **popen_kwargs)  # type: ignore
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        # 子プロセス(S)の実行中断を優先し、uvrun 本体は終了させない
+        if sys.platform == "win32":
+            try:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            except Exception:
+                process.terminate()
+        else:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGINT)
+            except Exception:
+                process.terminate()
+
+        return process.wait()
 
 
 _QUIT = object()  # 「終了」選択用センチネル
