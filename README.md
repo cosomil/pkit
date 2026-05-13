@@ -5,7 +5,7 @@ uvのセキュリティ設定ポリシーを設定する。
 サプライチェーン攻撃に対する防御に関する設定などを定める。
 
 ```shell
-uvx --from git+https://github.com/cosomil/pkit@main uvrun enforce_uv_policy
+uvx --from git+https://github.com/cosomil/pkit@main enforce_uv_policy
 ```
 
 ## `uvrun`
