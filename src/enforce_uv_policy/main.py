@@ -17,6 +17,10 @@ from tomlkit.toml_document import TOMLDocument
 
 
 MIN_EXCLUDE_NEWER = timedelta(days=2)
+TEMPLATE_CONFIG_TEXT = """# リリースされてから2日以上経過したパッケージのみインストールを許可する
+# （サプライチェーン攻撃で侵害されたパッケージは、多くの場合1日以内に発見、削除される）
+exclude-newer = \"2 days\"
+"""
 
 
 def load_toml(path: Path) -> TOMLDocument:
@@ -41,12 +45,8 @@ def user_config_path() -> Path:
     return Path.home() / ".config" / "uv" / "uv.toml"
 
 
-def template_config_path() -> Path:
-    return Path(__file__).with_name("template.toml")
-
-
 def load_template_toml() -> TOMLDocument:
-    return load_toml(template_config_path())
+    return parse(TEMPLATE_CONFIG_TEXT)
 
 
 def clone_document(document: TOMLDocument) -> TOMLDocument:
@@ -135,7 +135,7 @@ def enforce_policy(config: TOMLDocument | None) -> tuple[TOMLDocument, list[str]
     template = load_template_toml()
     template_value = template.get("exclude-newer")
     if template_value is None:
-        raise ValueError("template.toml に exclude-newer がありません")
+        raise ValueError("template config に exclude-newer がありません")
 
     if config is None:
         return clone_document(template), ["exclude-newer"]
