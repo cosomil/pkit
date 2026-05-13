@@ -6,11 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "questionary>=2.1.1",
+    "tomlkit>=0.13.2",
 ]
 
 [project.scripts]
 uvrun = "uvrun.main:main"
-checkversion = "checkversion.main:main"
+enforce_uv_policy = "enforce_uv_policy.main:main"
 
 [build-system]
 requires = ["setuptools"]
@@ -22,5 +23,10 @@ where = ["src"]
 [tool.uv.workspace]
 members = [
     "tests/sample",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
 ]
 
