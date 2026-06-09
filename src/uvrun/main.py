@@ -1,8 +1,9 @@
+import ast
+import os
 import shutil
+import signal
 import subprocess
 import sys
-import os
-import signal
 from pathlib import Path
 
 import questionary
@@ -118,11 +119,29 @@ def _terminate_process(process: subprocess.Popen, interrupt_timeout: float) -> N
             ) from e
 
 
+def _kill_process(process: subprocess.Popen) -> None:
+    """Ctrl+C 時に子プロセスを即座に強制終了する。"""
+    try:
+        if sys.platform == "win32":
+            process.kill()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+    process.wait()
+
+
 def _run_script(project_dir: Path, interrupt_timeout: float) -> int:
     """スクリプトを実行し終了コードを返す。"""
     script_path = _pick_script(project_dir)
-    script_rel = script_path.relative_to(project_dir)
-    cmd = ["uv", "run", str(script_rel)]
+    is_marimo_notebook = _is_marimo_notebook(script_path)
+    cmd = _script_command(project_dir, script_path, is_marimo_notebook)
+    if is_marimo_notebook:
+        print("スクリプトを終了するには Ctrl+C を押してください。")
 
     process = (
         subprocess.Popen(
@@ -136,8 +155,38 @@ def _run_script(project_dir: Path, interrupt_timeout: float) -> int:
         return process.wait()
     except KeyboardInterrupt:
         # 子プロセス(S)の実行中断を優先し、uvrun 本体は終了させない
-        _terminate_process(process, interrupt_timeout)
+        if is_marimo_notebook:
+            _kill_process(process)
+        else:
+            _terminate_process(process, interrupt_timeout)
         return _INTERRUPTED_EXIT_CODE
+
+
+def _is_marimo_notebook(script_path: Path) -> bool:
+    """marimo notebook かどうかを import 宣言から判定する。"""
+    try:
+        tree = ast.parse(script_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name == "marimo" for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.module == "marimo":
+            return True
+    return False
+
+
+def _script_command(
+    project_dir: Path, script_path: Path, is_marimo_notebook: bool | None = None
+) -> list[str]:
+    script_rel = script_path.relative_to(project_dir)
+    if is_marimo_notebook is None:
+        is_marimo_notebook = _is_marimo_notebook(script_path)
+    if is_marimo_notebook:
+        return ["uv", "run", "marimo", "-q", "run", str(script_rel)]
+    return ["uv", "run", str(script_rel)]
 
 
 _QUIT = object()  # 「終了」選択用センチネル
